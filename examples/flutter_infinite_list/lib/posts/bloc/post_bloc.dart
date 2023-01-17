@@ -9,9 +9,10 @@ import 'package:http/http.dart' as http;
 import 'package:stream_transform/stream_transform.dart';
 
 part 'post_event.dart';
+
 part 'post_state.dart';
 
-const _postLimit = 20;
+const _postLimit = 15;
 const throttleDuration = Duration(milliseconds: 100);
 
 EventTransformer<E> throttleDroppable<E>(Duration duration) {
@@ -30,34 +31,27 @@ class PostBloc extends Bloc<PostEvent, PostState> {
 
   final http.Client httpClient;
 
+  StreamController<List<Post>> postController = StreamController<List<Post>>();
+  List<Post> localPosts = [];
+  bool hasReachedMax = false;
+
   Future<void> _onPostFetched(
     PostFetched event,
     Emitter<PostState> emit,
   ) async {
-    if (state.hasReachedMax) return;
+    if (hasReachedMax) return;
     try {
-      if (state.status == PostStatus.initial) {
-        final posts = await _fetchPosts();
-        return emit(
-          state.copyWith(
-            status: PostStatus.success,
-            posts: posts,
-            hasReachedMax: false,
-          ),
-        );
+      final posts = await _fetchPosts(localPosts.length);
+      print("POST BLOC FETCHING... ${posts.length}");
+      if (posts.isEmpty) {
+        hasReachedMax = true;
+        return;
       }
-      final posts = await _fetchPosts(state.posts.length);
-      posts.isEmpty
-          ? emit(state.copyWith(hasReachedMax: true))
-          : emit(
-              state.copyWith(
-                status: PostStatus.success,
-                posts: List.of(state.posts)..addAll(posts),
-                hasReachedMax: false,
-              ),
-            );
-    } catch (_) {
-      emit(state.copyWith(status: PostStatus.failure));
+      localPosts = localPosts + posts;
+      postController.sink.add(posts);
+      hasReachedMax = false;
+    } catch (e) {
+      print("FETCHING ERROR: $e");
     }
   }
 
